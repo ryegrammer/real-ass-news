@@ -91,7 +91,149 @@ app.get('/api/camera/status', (req, res) => {
   });
 });
 
-// WebRTC configuration endpoint
+// ---- Recording endpoints ----
+
+// Start recording
+app.post('/api/camera/record/start', (req, res) => {
+  const { name = 'Recording', quality = 'medium' } = req.body;
+
+  if (activeRecording) {
+    return res.status(409).json({ error: 'A recording is already in progress' });
+  }
+
+  const id = `rec_${Date.now()}`;
+  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `${safeName}_${id}.h264`;
+  const filePath = path.join(RECORDING_PATH, fileName);
+  const settings = qualitySettings[quality] || qualitySettings.medium;
+
+  try {
+    const recArgs = [
+      '--nopreview',
+      '--timeout', '0',
+      '--width', settings.width.toString(),
+      '--height', settings.height.toString(),
+      '--framerate', settings.framerate.toString(),
+      '--bitrate', settings.bitrate.toString(),
+      '--output', filePath,
+      '--codec', 'h264',
+      '--inline',
+    ];
+
+    const recProcess = spawn('libcamera-vid', recArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    recProcess.on('error', () => {
+      // Fallback to raspivid
+      const rvArgs = [
+        '-t', '0',
+        '-w', settings.width.toString(),
+        '-h', settings.height.toString(),
+        '-fps', settings.framerate.toString(),
+        '-b', settings.bitrate.toString(),
+        '-o', filePath,
+        '-pf', 'baseline',
+      ];
+      activeRecording.process = spawn('raspivid', rvArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    });
+
+    recProcess.on('close', () => {
+      if (activeRecording && activeRecording.id === id) {
+        activeRecording = null;
+      }
+    });
+
+    activeRecording = { id, name, quality, filePath, fileName, startedAt: Date.now(), process: recProcess };
+    console.log(`Recording started: ${id} → ${filePath}`);
+    res.json({ id, name, quality });
+  } catch (error) {
+    console.error('Failed to start recording:', error);
+    res.status(500).json({ error: 'Failed to start recording' });
+  }
+});
+
+// Stop recording
+app.post('/api/camera/record/stop', (req, res) => {
+  const { id } = req.body;
+
+  if (!activeRecording) {
+    return res.status(404).json({ error: 'No active recording' });
+  }
+  if (id && activeRecording.id !== id) {
+    return res.status(404).json({ error: 'Recording ID mismatch' });
+  }
+
+  const rec = activeRecording;
+  try {
+    rec.process.kill('SIGTERM');
+  } catch (_) {}
+
+  const durationMs = Date.now() - rec.startedAt;
+  const durationSec = Math.round(durationMs / 1000);
+  const minutes = Math.floor(durationSec / 60).toString().padStart(2, '0');
+  const seconds = (durationSec % 60).toString().padStart(2, '0');
+  const duration = `${minutes}:${seconds}`;
+
+  let size = '0 KB';
+  try {
+    const stats = fs.statSync(rec.filePath);
+    const mb = stats.size / (1024 * 1024);
+    size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${(stats.size / 1024).toFixed(0)} KB`;
+  } catch (_) {}
+
+  activeRecording = null;
+  console.log(`Recording stopped: ${rec.id} (${duration})`);
+
+  // Write metadata alongside file
+  const meta = { id: rec.id, name: rec.name, quality: rec.quality, date: new Date(rec.startedAt).toISOString().split('T')[0], duration, size, fileName: rec.fileName };
+  try {
+    fs.writeFileSync(rec.filePath.replace('.h264', '.json'), JSON.stringify(meta, null, 2));
+  } catch (_) {}
+
+  res.json({ id: rec.id, duration, size });
+});
+
+// List saved recordings
+app.get('/api/camera/recordings', (req, res) => {
+  try {
+    const files = fs.readdirSync(RECORDING_PATH).filter(f => f.endsWith('.json'));
+    const recordings = files.map(f => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(RECORDING_PATH, f), 'utf-8'));
+      } catch (_) { return null; }
+    }).filter(Boolean).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    res.json(recordings);
+  } catch (error) {
+    console.error('Failed to list recordings:', error);
+    res.json([]);
+  }
+});
+
+// Download a recording file
+app.get('/api/camera/recordings/:id', (req, res) => {
+  try {
+    const files = fs.readdirSync(RECORDING_PATH).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      const meta = JSON.parse(fs.readFileSync(path.join(RECORDING_PATH, f), 'utf-8'));
+      if (meta.id === req.params.id && meta.fileName) {
+        const videoPath = path.join(RECORDING_PATH, meta.fileName);
+        if (fs.existsSync(videoPath)) {
+          res.setHeader('Content-Disposition', `attachment; filename="${meta.fileName}"`);
+          return res.sendFile(videoPath);
+        }
+      }
+    }
+    res.status(404).json({ error: 'Recording not found' });
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Failed to download recording' });
+  }
+});
+
+
 app.get('/api/camera/webrtc-config', (req, res) => {
   res.json({
     iceServers: [
