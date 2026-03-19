@@ -85,15 +85,15 @@ ssh $PI_USER@$PI_HOST << 'EOF'
     fi
 
     # Stop existing container if running
-    cd /opt/pi-camera-webapp
-    sudo docker-compose -f docker/docker-compose.pi.yml down 2>/dev/null || true
+    cd /opt/pi-camera-webapp/docker
+    sudo docker-compose -f docker-compose.pi.yml down 2>/dev/null || true
 
     # Build and start the application
     echo "🏗️ Building Docker image..."
-    sudo docker-compose -f docker/docker-compose.pi.yml build
+    sudo docker-compose -f docker-compose.pi.yml build
 
     echo "🚀 Starting application..."
-    sudo docker-compose -f docker/docker-compose.pi.yml up -d
+    sudo docker-compose -f docker-compose.pi.yml up -d
 
     # Clean up
     rm -f /tmp/pi-deployment.tar.gz
