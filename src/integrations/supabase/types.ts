@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "12.2.3 (519615d)"
+    PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
@@ -162,6 +162,8 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          meaning_score: number | null
+          pleasure_score: number | null
           response: string | null
           sequence: number
           significants_awarded: number | null
@@ -177,6 +179,8 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          meaning_score?: number | null
+          pleasure_score?: number | null
           response?: string | null
           sequence: number
           significants_awarded?: number | null
@@ -192,6 +196,8 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          meaning_score?: number | null
+          pleasure_score?: number | null
           response?: string | null
           sequence?: number
           significants_awarded?: number | null
@@ -328,6 +334,140 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      outdoor_logs: {
+        Row: {
+          created_at: string | null
+          distance_feet: number | null
+          duration_minutes: number
+          id: string
+          logged_at: string | null
+          meaning_score: number | null
+          notes: string | null
+          pleasure_score: number | null
+          significants_earned: number | null
+          task_type: string
+          user_id: string
+          weather: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          distance_feet?: number | null
+          duration_minutes: number
+          id?: string
+          logged_at?: string | null
+          meaning_score?: number | null
+          notes?: string | null
+          pleasure_score?: number | null
+          significants_earned?: number | null
+          task_type: string
+          user_id: string
+          weather?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          distance_feet?: number | null
+          duration_minutes?: number
+          id?: string
+          logged_at?: string | null
+          meaning_score?: number | null
+          notes?: string | null
+          pleasure_score?: number | null
+          significants_earned?: number | null
+          task_type?: string
+          user_id?: string
+          weather?: string | null
+        }
+        Relationships: []
+      }
+      photo_pairs: {
+        Row: {
+          after_image_url: string | null
+          before_image_url: string
+          caption: string | null
+          created_at: string | null
+          danger_tag: string | null
+          disaster_type: string
+          id: string
+          is_public: boolean | null
+          location_name: string | null
+          meaning_score: number | null
+          pleasure_score: number | null
+          project_tag: string | null
+          title: string
+          user_id: string
+        }
+        Insert: {
+          after_image_url?: string | null
+          before_image_url: string
+          caption?: string | null
+          created_at?: string | null
+          danger_tag?: string | null
+          disaster_type: string
+          id?: string
+          is_public?: boolean | null
+          location_name?: string | null
+          meaning_score?: number | null
+          pleasure_score?: number | null
+          project_tag?: string | null
+          title: string
+          user_id: string
+        }
+        Update: {
+          after_image_url?: string | null
+          before_image_url?: string
+          caption?: string | null
+          created_at?: string | null
+          danger_tag?: string | null
+          disaster_type?: string
+          id?: string
+          is_public?: boolean | null
+          location_name?: string | null
+          meaning_score?: number | null
+          pleasure_score?: number | null
+          project_tag?: string | null
+          title?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      problem_scores: {
+        Row: {
+          created_at: string | null
+          id: string
+          meaning_score: number | null
+          option_id: number
+          pleasure_score: number | null
+          problem_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          meaning_score?: number | null
+          option_id: number
+          pleasure_score?: number | null
+          problem_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          meaning_score?: number | null
+          option_id?: number
+          pleasure_score?: number | null
+          problem_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_scores_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       profiles: {
         Row: {
@@ -678,6 +818,7 @@ export type Database = {
           title: string
           user_id: string | null
           views: number
+          visibility: string
           votes: number
         }
         Insert: {
@@ -690,6 +831,7 @@ export type Database = {
           title: string
           user_id?: string | null
           views?: number
+          visibility?: string
           votes?: number
         }
         Update: {
@@ -702,6 +844,7 @@ export type Database = {
           title?: string
           user_id?: string | null
           views?: number
+          visibility?: string
           votes?: number
         }
         Relationships: []
@@ -759,8 +902,8 @@ export type Database = {
           hint: string | null
           id: string
           image: string | null
+          ryans_writing: string | null
           sequence_order: number | null
-          significant_reward: number | null
           story_id: string
         }
         Insert: {
@@ -773,8 +916,8 @@ export type Database = {
           hint?: string | null
           id?: string
           image?: string | null
+          ryans_writing?: string | null
           sequence_order?: number | null
-          significant_reward?: number | null
           story_id: string
         }
         Update: {
@@ -787,8 +930,8 @@ export type Database = {
           hint?: string | null
           id?: string
           image?: string | null
+          ryans_writing?: string | null
           sequence_order?: number | null
-          significant_reward?: number | null
           story_id?: string
         }
         Relationships: [
@@ -800,6 +943,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      story_scenarios: {
+        Row: {
+          communication_type: string
+          content: Json
+          created_at: string | null
+          id: string
+          response_type: string
+          scenario_id: number
+          sequence: number
+          title: string
+          user_report: string
+        }
+        Insert: {
+          communication_type: string
+          content: Json
+          created_at?: string | null
+          id?: string
+          response_type: string
+          scenario_id: number
+          sequence?: number
+          title: string
+          user_report: string
+        }
+        Update: {
+          communication_type?: string
+          content?: Json
+          created_at?: string | null
+          id?: string
+          response_type?: string
+          scenario_id?: number
+          sequence?: number
+          title?: string
+          user_report?: string
+        }
+        Relationships: []
       }
       task_status_history: {
         Row: {
@@ -839,6 +1018,8 @@ export type Database = {
           created_at: string | null
           description: string | null
           id: string
+          meaning_score: number | null
+          pleasure_score: number | null
           priority: string
           project_id: string | null
           status: string
@@ -851,6 +1032,8 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          meaning_score?: number | null
+          pleasure_score?: number | null
           priority?: string
           project_id?: string | null
           status?: string
@@ -863,6 +1046,8 @@ export type Database = {
           created_at?: string | null
           description?: string | null
           id?: string
+          meaning_score?: number | null
+          pleasure_score?: number | null
           priority?: string
           project_id?: string | null
           status?: string
@@ -901,9 +1086,156 @@ export type Database = {
         }
         Relationships: []
       }
+      with_it_items: {
+        Row: {
+          argument: string | null
+          category: string | null
+          created_at: string | null
+          id: string
+          is_seeded: boolean | null
+          submitter_id: string | null
+          submitter_name: string | null
+          title: string
+        }
+        Insert: {
+          argument?: string | null
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          is_seeded?: boolean | null
+          submitter_id?: string | null
+          submitter_name?: string | null
+          title: string
+        }
+        Update: {
+          argument?: string | null
+          category?: string | null
+          created_at?: string | null
+          id?: string
+          is_seeded?: boolean | null
+          submitter_id?: string | null
+          submitter_name?: string | null
+          title?: string
+        }
+        Relationships: []
+      }
+      with_it_ratings: {
+        Row: {
+          created_at: string | null
+          happiness_score: number | null
+          id: string
+          item_id: string
+          meaning_score: number
+          pleasure_score: number
+          rater_id: string | null
+          rater_token: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          happiness_score?: number | null
+          id?: string
+          item_id: string
+          meaning_score: number
+          pleasure_score: number
+          rater_id?: string | null
+          rater_token?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          happiness_score?: number | null
+          id?: string
+          item_id?: string
+          meaning_score?: number
+          pleasure_score?: number
+          rater_id?: string | null
+          rater_token?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "with_it_ratings_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "with_it_aggregates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "with_it_ratings_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "with_it_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      quiz_questions_public: {
+        Row: {
+          category: string | null
+          created_at: string | null
+          explanation: string | null
+          id: string | null
+          options: Json | null
+          question_text: string | null
+          sequence_order: number | null
+          story_node_id: string | null
+          thinking_level: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string | null
+          explanation?: string | null
+          id?: string | null
+          options?: Json | null
+          question_text?: string | null
+          sequence_order?: number | null
+          story_node_id?: string | null
+          thinking_level?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string | null
+          explanation?: string | null
+          id?: string | null
+          options?: Json | null
+          question_text?: string | null
+          sequence_order?: number | null
+          story_node_id?: string | null
+          thinking_level?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_quiz_questions_story_node"
+            columns: ["story_node_id"]
+            isOneToOne: false
+            referencedRelation: "story_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      with_it_aggregates: {
+        Row: {
+          argument: string | null
+          avg_happiness: number | null
+          avg_meaning: number | null
+          avg_pleasure: number | null
+          category: string | null
+          created_at: string | null
+          id: string | null
+          is_seeded: boolean | null
+          rating_count: number | null
+          submitter_id: string | null
+          submitter_name: string | null
+          title: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_shattered_core_quiz_questions: { Args: never; Returns: undefined }
@@ -939,6 +1271,10 @@ export type Database = {
           p_target_user_id: string
         }
         Returns: undefined
+      }
+      validate_quiz_answer: {
+        Args: { p_question_id: string; p_selected_answer: number }
+        Returns: Json
       }
     }
     Enums: {
