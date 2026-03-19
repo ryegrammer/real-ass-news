@@ -83,13 +83,14 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
     }
   };
 
-  const toggleRecording = () => {
+  const toggleRecording = async () => {
     if (!isStreaming) return;
-    setIsRecording(!isRecording);
-    onRecordingChange?.(!isRecording);
+    const newState = !isRecording;
+    setIsRecording(newState);
+    onRecordingChange?.(newState);
     toast({
-      title: isRecording ? 'Recording stopped' : 'Recording started',
-      description: isRecording ? 'Your recording has been saved.' : 'Recording from Pi camera stream.',
+      title: newState ? 'Recording started' : 'Recording stopped',
+      description: newState ? 'Recording from Pi camera stream.' : 'Your recording has been saved.',
     });
   };
 
