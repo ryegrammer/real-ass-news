@@ -53,7 +53,7 @@ const Index = () => {
           <StreamingSection onRecordingChange={handleRecordingChange} />
           
           <div className="mt-8">
-            <RecordingControls isRecording={isRecording} />
+            <RecordingControls isRecording={isRecording} recordingId={recordingId} onRecordingChange={handleRecordingChange} />
           </div>
         </div>
       </section>
