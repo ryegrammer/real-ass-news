@@ -1,11 +1,16 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, Settings, Video, VideoOff } from 'lucide-react';
+import { Play, Pause, Settings, Video, VideoOff, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
-import { initPiCamera, startPiCameraStream, stopPiCameraStream, getCameraStatus } from '@/lib/piCameraUtils';
+import {
+  initPiCamera,
+  startPiCameraStream,
+  stopPiCameraStream,
+  getCameraStatus,
+  type StreamQuality,
+} from '@/lib/piCameraUtils';
 
 interface StreamingSectionProps {
   onRecordingChange?: (isRecording: boolean) => void;
@@ -15,85 +20,64 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
   const [isStreaming, setIsStreaming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [streamQuality, setStreamQuality] = useState<'auto' | 'high' | 'medium' | 'low'>('auto');
-  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected'>('disconnected');
+  const [streamQuality, setStreamQuality] = useState<StreamQuality>('auto');
+  const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
+  const [piReachable, setPiReachable] = useState<boolean | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const isMobile = useIsMobile();
   const { toast } = useToast();
 
+  // On mount, probe the Pi server health
   useEffect(() => {
-    const setupCamera = async () => {
-      const initialized = await initPiCamera();
-      if (!initialized) {
-        toast({
-          title: "Pi Camera Error",
-          description: "Failed to initialize Pi camera. Check connection and permissions.",
-          variant: "destructive"
-        });
-      }
+    let cancelled = false;
+    const probe = async () => {
+      const ok = await initPiCamera();
+      if (!cancelled) setPiReachable(ok);
     };
-
-    setupCamera();
-  }, [toast]);
+    probe();
+    return () => { cancelled = true; };
+  }, []);
 
   const toggleStream = async () => {
     if (isStreaming) {
-      // Stop streaming
+      // ---- Stop ----
       setIsLoading(true);
       try {
         await stopPiCameraStream();
         setConnectionStatus('disconnected');
-        setIsLoading(false);
         setIsStreaming(false);
 
         if (isRecording) {
           setIsRecording(false);
           onRecordingChange?.(false);
-          toast({
-            title: "Recording stopped",
-            description: "Your recording has been saved",
-          });
+          toast({ title: 'Recording stopped', description: 'Your recording has been saved.' });
         }
       } catch (error) {
-        console.error('Failed to disconnect:', error);
-        toast({
-          title: "Connection error",
-          description: "Failed to disconnect Pi camera stream",
-          variant: "destructive"
-        });
+        console.error('Disconnect failed:', error);
+        toast({ title: 'Disconnect error', description: String(error), variant: 'destructive' });
+      } finally {
         setIsLoading(false);
       }
     } else {
-      // Start streaming
+      // ---- Start ----
+      if (!videoRef.current) return;
       setIsLoading(true);
       setConnectionStatus('connecting');
 
       try {
-        if (videoRef.current) {
-          const streamUrl = await startPiCameraStream(videoRef.current, streamQuality);
-          if (streamUrl) {
-            setConnectionStatus('connected');
-            setIsLoading(false);
-            setIsStreaming(true);
-
-            toast({
-              title: "Pi Camera connected",
-              description: `Stream started (${streamQuality} quality)`,
-            });
-          } else {
-            throw new Error('Failed to get stream URL');
-          }
-        } else {
-          throw new Error('Video element not found');
-        }
+        await startPiCameraStream(videoRef.current, streamQuality);
+        setConnectionStatus('connected');
+        setIsStreaming(true);
+        toast({ title: 'Pi Camera connected', description: `Streaming at ${streamQuality} quality.` });
       } catch (error) {
-        console.error('Failed to connect:', error);
+        console.error('Connect failed:', error);
+        setConnectionStatus('error');
         toast({
-          title: "Connection error",
-          description: "Failed to start Pi camera stream",
-          variant: "destructive"
+          title: 'Connection failed',
+          description: 'Could not connect to the Pi camera server. Is it running?',
+          variant: 'destructive',
         });
-        setConnectionStatus('disconnected');
+      } finally {
         setIsLoading(false);
       }
     }
@@ -101,72 +85,76 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
 
   const toggleRecording = () => {
     if (!isStreaming) return;
-    
     setIsRecording(!isRecording);
     onRecordingChange?.(!isRecording);
-    
     toast({
-      title: isRecording ? "Recording stopped" : "Recording started",
-      description: isRecording 
-        ? "Your recording has been saved" 
-        : "Recording educational content from stream",
+      title: isRecording ? 'Recording stopped' : 'Recording started',
+      description: isRecording ? 'Your recording has been saved.' : 'Recording from Pi camera stream.',
     });
   };
 
-  // Clean up on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (isStreaming) {
-        // No need for disconnectFromStream since we're just updating UI state
-        setIsStreaming(false);
-      }
+      stopPiCameraStream().catch(() => {});
     };
-  }, [isStreaming]);
+  }, []);
+
+  const piHost = getCameraStatus().piHost;
 
   return (
     <div className="w-full max-w-5xl mx-auto rounded-2xl glass-panel overflow-hidden">
       {/* Video Stream Container */}
       <div className="aspect-video bg-black/90 w-full relative">
-        {!isStreaming ? (
+        {/* Always render the video element so JMuxer can attach */}
+        <video
+          ref={videoRef}
+          className={cn('w-full h-full object-cover', !isStreaming && 'hidden')}
+          muted
+          playsInline
+          autoPlay
+          controls
+        />
+
+        {!isStreaming && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-white gap-4">
             <VideoOff className="size-16 mb-2 text-white/50" />
             <h3 className="text-xl font-medium">Stream Disconnected</h3>
             <p className="text-white/70 max-w-md text-center">
-              Connect to your Raspberry Pi 5 to start streaming and recording educational content
+              Connect to your Raspberry Pi 5 to start streaming and recording educational content.
             </p>
-            <Button 
+
+            {/* Pi reachability indicator */}
+            <div className="flex items-center gap-2 text-sm text-white/60">
+              {piReachable === null ? (
+                'Checking Pi…'
+              ) : piReachable ? (
+                <><Wifi className="size-4 text-green-400" /> Pi server reachable at {piHost}</>
+              ) : (
+                <><WifiOff className="size-4 text-red-400" /> Pi server unreachable ({piHost})</>
+              )}
+            </div>
+
+            <Button
               className="mt-4 font-medium"
               onClick={toggleStream}
               disabled={isLoading}
             >
-              {isLoading ? 'Connecting...' : 'Connect to Pi'}
+              {isLoading ? 'Connecting…' : 'Connect to Pi'}
             </Button>
           </div>
-        ) : (
-          <>
-            <video 
-              ref={videoRef} 
-              className="w-full h-full object-cover"
-              muted
-              playsInline
-              autoPlay
-              loop
-              controls
-              poster="/placeholder.svg"
-            />
-            
-            {/* Recording Indicator */}
-            {isRecording && (
-              <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-destructive/90 text-destructive-foreground rounded-full text-sm animate-pulse-subtle">
-                <div className="size-2 rounded-full bg-destructive-foreground"></div>
-                Recording
-              </div>
-            )}
-          </>
+        )}
+
+        {/* Recording indicator */}
+        {isStreaming && isRecording && (
+          <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-destructive/90 text-destructive-foreground rounded-full text-sm animate-pulse-subtle">
+            <div className="size-2 rounded-full bg-destructive-foreground" />
+            Recording
+          </div>
         )}
       </div>
-      
-      {/* Controls */}
+
+      {/* Controls bar */}
       <div className="p-4 flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center gap-2">
           <Button
@@ -174,50 +162,45 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
             size="icon"
             disabled={!isStreaming || isLoading}
             onClick={toggleRecording}
-            className={cn(
-              "transition-all",
-              isRecording && "text-destructive border-destructive/30"
-            )}
+            className={cn('transition-all', isRecording && 'text-destructive border-destructive/30')}
           >
             {isRecording ? <Pause className="size-5" /> : <Play className="size-5" />}
           </Button>
-          
+
           <div className="flex flex-col">
             <h3 className="font-medium">Raspberry Pi Stream</h3>
             <p className="text-xs text-muted-foreground">
-              {connectionStatus === 'connected' 
-                ? `Connected (${streamQuality})` 
-                : connectionStatus === 'connecting' 
-                  ? 'Connecting...' 
-                  : 'Disconnected'}
+              {connectionStatus === 'connected'
+                ? `Connected (${streamQuality})`
+                : connectionStatus === 'connecting'
+                  ? 'Connecting…'
+                  : connectionStatus === 'error'
+                    ? 'Connection failed'
+                    : 'Disconnected'}
             </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-3">
           <select
             className="px-3 py-2 rounded-md text-sm bg-background border border-border"
             value={streamQuality}
-            onChange={(e) => setStreamQuality(e.target.value as 'auto' | 'high' | 'medium' | 'low')}
+            onChange={(e) => setStreamQuality(e.target.value as StreamQuality)}
             disabled={isStreaming || isLoading}
           >
             <option value="auto">Auto Quality</option>
-            <option value="high">High Quality</option>
-            <option value="medium">Medium Quality</option>
-            <option value="low">Low Quality</option>
+            <option value="high">High (1080p)</option>
+            <option value="medium">Medium (720p)</option>
+            <option value="low">Low (480p)</option>
           </select>
-          
+
           <Button
-            variant={isStreaming ? "destructive" : "default"}
+            variant={isStreaming ? 'destructive' : 'default'}
             onClick={toggleStream}
             disabled={isLoading}
             className="font-medium"
           >
-            {isLoading 
-              ? 'Processing...' 
-              : isStreaming 
-                ? 'Disconnect' 
-                : 'Connect'}
+            {isLoading ? 'Processing…' : isStreaming ? 'Disconnect' : 'Connect'}
           </Button>
         </div>
       </div>
