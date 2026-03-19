@@ -15,6 +15,13 @@ const signalingWss = new WebSocket.Server({ server, path: '/webrtc-signaling' })
 let cameraProcess = null;
 let isStreaming = false;
 
+// ---- Recording state ----
+const RECORDING_PATH = process.env.RECORDING_PATH || '/var/recordings';
+let activeRecording = null; // { id, name, quality, filePath, startedAt, process }
+
+// Ensure recording directory exists
+try { fs.mkdirSync(RECORDING_PATH, { recursive: true }); } catch (_) {}
+
 // Track WebRTC peers
 const webrtcPeers = new Map();
 
