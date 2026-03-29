@@ -29,7 +29,7 @@ const mockMediaRecorder = {
   onstop: null,
 } as any
 
-global.MediaRecorder = vi.fn().mockImplementation(() => mockMediaRecorder)
+global.MediaRecorder = vi.fn().mockImplementation(function () { return mockMediaRecorder; })
 
 // Mock canvas and video elements
 const mockCanvas = {
@@ -60,12 +60,14 @@ Object.defineProperty(global, 'document', {
 })
 
 describe('piCameraUtils', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Reset module-level streamConnection state from previous test
+    try { await stopPiCameraStream() } catch {}
     vi.clearAllMocks()
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
+    // Re-setup MediaRecorder mock after clearAllMocks
+    ;(global.MediaRecorder as any) = vi.fn().mockImplementation(function () { return mockMediaRecorder; })
+    mockMediaRecorder.start = vi.fn()
+    mockMediaRecorder.stop = vi.fn()
   })
 
   describe('initPiCamera', () => {

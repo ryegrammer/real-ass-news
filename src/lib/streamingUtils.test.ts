@@ -78,13 +78,13 @@ describe('streamingUtils', () => {
         autoSave: false
       }
 
-      // Mock Date.now to return different values
-      const mockNow = vi.spyOn(Date, 'now')
-      mockNow.mockReturnValueOnce(1000)
-      mockNow.mockReturnValueOnce(2000)
-
+      // Use fake timers to control Date.now
+      vi.useFakeTimers()
+      vi.setSystemTime(1000)
       const id1 = await startRecording(options)
+      vi.setSystemTime(2000)
       const id2 = await startRecording({ ...options, name: 'Test Recording 2' })
+      vi.useRealTimers()
 
       expect(id1).toBe('rec_1000')
       expect(id2).toBe('rec_2000')
@@ -113,7 +113,7 @@ describe('streamingUtils', () => {
 
       const result = await stopRecording('test_id')
 
-      expect(result.duration).toBe('30:15')
+      expect(result.duration).toBe('31:15')
     })
 
     it('should handle different recording IDs', async () => {

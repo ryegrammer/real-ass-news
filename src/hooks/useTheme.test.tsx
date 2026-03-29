@@ -23,7 +23,7 @@ Object.defineProperty(document, 'documentElement', {
 describe('useTheme', () => {
   const mockSetTheme = vi.fn()
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
 
     // Reset the mock implementation
