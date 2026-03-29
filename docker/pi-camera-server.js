@@ -2,13 +2,28 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+
+// WebSocket server for signaling (WebRTC) and legacy streaming
 const wss = new WebSocket.Server({ server, path: '/camera-stream' });
+const signalingWss = new WebSocket.Server({ server, path: '/webrtc-signaling' });
 
 let cameraProcess = null;
 let isStreaming = false;
+
+// ---- Recording state ----
+const RECORDING_PATH = process.env.RECORDING_PATH || '/var/recordings';
+let activeRecording = null; // { id, name, quality, filePath, startedAt, process }
+
+// Ensure recording directory exists
+try { fs.mkdirSync(RECORDING_PATH, { recursive: true }); } catch (_) {}
+
+// Track WebRTC peers
+const webrtcPeers = new Map();
 
 // Middleware
 app.use(express.json());
@@ -31,6 +46,7 @@ app.get('/api/camera/health', (req, res) => {
   res.json({
     status: 'healthy',
     streaming: isStreaming,
+    webrtcPeers: webrtcPeers.size,
     timestamp: new Date().toISOString()
   });
 });
@@ -70,30 +86,182 @@ app.get('/api/camera/status', (req, res) => {
   res.json({
     streaming: isStreaming,
     connected_clients: wss.clients.size,
+    webrtc_peers: webrtcPeers.size,
     uptime: process.uptime()
   });
 });
 
-function startCameraStream(quality) {
-  // Quality settings for libcamera
-  const qualitySettings = {
-    low: { width: 640, height: 480, framerate: 15, bitrate: 1000000 },
-    medium: { width: 1280, height: 720, framerate: 30, bitrate: 2000000 },
-    high: { width: 1920, height: 1080, framerate: 30, bitrate: 4000000 }
-  };
+// ---- Recording endpoints ----
 
+// Start recording
+app.post('/api/camera/record/start', (req, res) => {
+  const { name = 'Recording', quality = 'medium' } = req.body;
+
+  if (activeRecording) {
+    return res.status(409).json({ error: 'A recording is already in progress' });
+  }
+
+  const id = `rec_${Date.now()}`;
+  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `${safeName}_${id}.h264`;
+  const filePath = path.join(RECORDING_PATH, fileName);
+  const settings = qualitySettings[quality] || qualitySettings.medium;
+
+  try {
+    const recArgs = [
+      '--nopreview',
+      '--timeout', '0',
+      '--width', settings.width.toString(),
+      '--height', settings.height.toString(),
+      '--framerate', settings.framerate.toString(),
+      '--bitrate', settings.bitrate.toString(),
+      '--output', filePath,
+      '--codec', 'h264',
+      '--inline',
+    ];
+
+    const recProcess = spawn('libcamera-vid', recArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    recProcess.on('error', () => {
+      // Fallback to raspivid
+      const rvArgs = [
+        '-t', '0',
+        '-w', settings.width.toString(),
+        '-h', settings.height.toString(),
+        '-fps', settings.framerate.toString(),
+        '-b', settings.bitrate.toString(),
+        '-o', filePath,
+        '-pf', 'baseline',
+      ];
+      activeRecording.process = spawn('raspivid', rvArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    });
+
+    recProcess.on('close', () => {
+      if (activeRecording && activeRecording.id === id) {
+        activeRecording = null;
+      }
+    });
+
+    activeRecording = { id, name, quality, filePath, fileName, startedAt: Date.now(), process: recProcess };
+    console.log(`Recording started: ${id} → ${filePath}`);
+    res.json({ id, name, quality });
+  } catch (error) {
+    console.error('Failed to start recording:', error);
+    res.status(500).json({ error: 'Failed to start recording' });
+  }
+});
+
+// Stop recording
+app.post('/api/camera/record/stop', (req, res) => {
+  const { id } = req.body;
+
+  if (!activeRecording) {
+    return res.status(404).json({ error: 'No active recording' });
+  }
+  if (id && activeRecording.id !== id) {
+    return res.status(404).json({ error: 'Recording ID mismatch' });
+  }
+
+  const rec = activeRecording;
+  try {
+    rec.process.kill('SIGTERM');
+  } catch (_) {}
+
+  const durationMs = Date.now() - rec.startedAt;
+  const durationSec = Math.round(durationMs / 1000);
+  const minutes = Math.floor(durationSec / 60).toString().padStart(2, '0');
+  const seconds = (durationSec % 60).toString().padStart(2, '0');
+  const duration = `${minutes}:${seconds}`;
+
+  let size = '0 KB';
+  try {
+    const stats = fs.statSync(rec.filePath);
+    const mb = stats.size / (1024 * 1024);
+    size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${(stats.size / 1024).toFixed(0)} KB`;
+  } catch (_) {}
+
+  activeRecording = null;
+  console.log(`Recording stopped: ${rec.id} (${duration})`);
+
+  // Write metadata alongside file
+  const meta = { id: rec.id, name: rec.name, quality: rec.quality, date: new Date(rec.startedAt).toISOString().split('T')[0], duration, size, fileName: rec.fileName };
+  try {
+    fs.writeFileSync(rec.filePath.replace('.h264', '.json'), JSON.stringify(meta, null, 2));
+  } catch (_) {}
+
+  res.json({ id: rec.id, duration, size });
+});
+
+// List saved recordings
+app.get('/api/camera/recordings', (req, res) => {
+  try {
+    const files = fs.readdirSync(RECORDING_PATH).filter(f => f.endsWith('.json'));
+    const recordings = files.map(f => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(RECORDING_PATH, f), 'utf-8'));
+      } catch (_) { return null; }
+    }).filter(Boolean).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    res.json(recordings);
+  } catch (error) {
+    console.error('Failed to list recordings:', error);
+    res.json([]);
+  }
+});
+
+// Download a recording file
+app.get('/api/camera/recordings/:id', (req, res) => {
+  try {
+    const files = fs.readdirSync(RECORDING_PATH).filter(f => f.endsWith('.json'));
+    for (const f of files) {
+      const meta = JSON.parse(fs.readFileSync(path.join(RECORDING_PATH, f), 'utf-8'));
+      if (meta.id === req.params.id && meta.fileName) {
+        const videoPath = path.join(RECORDING_PATH, meta.fileName);
+        if (fs.existsSync(videoPath)) {
+          res.setHeader('Content-Disposition', `attachment; filename="${meta.fileName}"`);
+          return res.sendFile(videoPath);
+        }
+      }
+    }
+    res.status(404).json({ error: 'Recording not found' });
+  } catch (error) {
+    console.error('Download error:', error);
+    res.status(500).json({ error: 'Failed to download recording' });
+  }
+});
+
+
+app.get('/api/camera/webrtc-config', (req, res) => {
+  res.json({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  });
+});
+
+// Quality settings for libcamera
+const qualitySettings = {
+  low: { width: 640, height: 480, framerate: 15, bitrate: 1000000 },
+  medium: { width: 1280, height: 720, framerate: 30, bitrate: 2000000 },
+  high: { width: 1920, height: 1080, framerate: 30, bitrate: 4000000 }
+};
+
+function startCameraStream(quality) {
   const settings = qualitySettings[quality] || qualitySettings.medium;
 
   // Use libcamera for Raspberry Pi Camera Module 3
-  // This command streams H.264 video via stdout
   const cameraArgs = [
     '--nopreview',
-    '--timeout', '0', // Stream indefinitely
+    '--timeout', '0',
     '--width', settings.width.toString(),
     '--height', settings.height.toString(),
     '--framerate', settings.framerate.toString(),
     '--bitrate', settings.bitrate.toString(),
-    '--output', '-', // Output to stdout
+    '--output', '-',
     '--codec', 'h264',
     '--inline',
     '--listen'
@@ -101,24 +269,22 @@ function startCameraStream(quality) {
 
   console.log(`Starting camera with quality: ${quality}`, settings);
 
-  // Try libcamera-vid first (Raspberry Pi OS Bullseye and later)
   cameraProcess = spawn('libcamera-vid', cameraArgs, {
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
   cameraProcess.on('error', (error) => {
     console.error('Camera process error:', error);
-
-    // Fallback to raspivid for older systems
     console.log('Trying fallback to raspivid...');
+    
     const raspividArgs = [
-      '-t', '0', // Capture indefinitely
+      '-t', '0',
       '-w', settings.width.toString(),
       '-h', settings.height.toString(),
       '-fps', settings.framerate.toString(),
       '-b', settings.bitrate.toString(),
-      '-o', '-', // Output to stdout
-      '-pf', 'baseline' // H.264 baseline profile
+      '-o', '-',
+      '-pf', 'baseline'
     ];
 
     cameraProcess = spawn('raspivid', raspividArgs, {
@@ -127,10 +293,21 @@ function startCameraStream(quality) {
   });
 
   cameraProcess.stdout.on('data', (data) => {
-    // Broadcast video data to all connected WebSocket clients
+    // Broadcast to legacy WebSocket clients
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(data);
+      }
+    });
+
+    // Send to WebRTC data channels if available
+    webrtcPeers.forEach((peer, peerId) => {
+      if (peer.dataChannel && peer.dataChannel.readyState === 'open') {
+        try {
+          peer.dataChannel.send(data);
+        } catch (err) {
+          console.error(`Error sending to peer ${peerId}:`, err);
+        }
       }
     });
   });
@@ -153,9 +330,9 @@ function stopCameraStream() {
   isStreaming = false;
 }
 
-// WebSocket connection handling
+// Legacy WebSocket connection handling
 wss.on('connection', (ws) => {
-  console.log('Client connected to camera stream');
+  console.log('Client connected to camera stream (legacy)');
 
   ws.on('message', (message) => {
     try {
@@ -193,10 +370,140 @@ wss.on('connection', (ws) => {
   });
 });
 
+// WebRTC Signaling WebSocket handling
+signalingWss.on('connection', (ws) => {
+  const peerId = `peer_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  console.log(`WebRTC peer connected: ${peerId}`);
+
+  webrtcPeers.set(peerId, { ws, dataChannel: null });
+
+  // Send peer ID to client
+  ws.send(JSON.stringify({
+    type: 'peer_id',
+    peerId
+  }));
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      console.log(`Received signaling message from ${peerId}:`, data.type);
+
+      switch (data.type) {
+        case 'offer':
+          // In a full implementation, this would create an RTCPeerConnection
+          // and generate an answer. For Pi, we'd use GStreamer or similar
+          // to handle the actual WebRTC connection.
+          handleWebRTCOffer(peerId, data);
+          break;
+
+        case 'answer':
+          handleWebRTCAnswer(peerId, data);
+          break;
+
+        case 'ice_candidate':
+          handleICECandidate(peerId, data);
+          break;
+
+        case 'request_stream':
+          if (isStreaming) {
+            ws.send(JSON.stringify({ type: 'stream_available', peerId }));
+          } else {
+            ws.send(JSON.stringify({ type: 'stream_unavailable' }));
+          }
+          break;
+
+        case 'change_quality':
+          if (isStreaming) {
+            const quality = data.quality || 'medium';
+            stopCameraStream();
+            setTimeout(() => startCameraStream(quality), 500);
+            ws.send(JSON.stringify({ type: 'quality_changed', quality }));
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('WebRTC signaling error:', error);
+      ws.send(JSON.stringify({ type: 'error', message: error.message }));
+    }
+  });
+
+  ws.on('close', () => {
+    console.log(`WebRTC peer disconnected: ${peerId}`);
+    webrtcPeers.delete(peerId);
+  });
+
+  ws.on('error', (error) => {
+    console.error(`WebRTC peer error (${peerId}):`, error);
+  });
+});
+
+// WebRTC signaling handlers
+function handleWebRTCOffer(peerId, data) {
+  const peer = webrtcPeers.get(peerId);
+  if (!peer) return;
+
+  // For a complete WebRTC implementation on Pi, you would:
+  // 1. Use node-webrtc or wrtc package
+  // 2. Or spawn GStreamer with webrtcbin
+  // 3. Create answer SDP and send back
+
+  // Simplified response - in production, integrate with actual WebRTC stack
+  console.log(`Processing WebRTC offer from ${peerId}`);
+  
+  // Send acknowledgment (actual answer would come from WebRTC stack)
+  peer.ws.send(JSON.stringify({
+    type: 'offer_received',
+    peerId,
+    message: 'WebRTC offer received. Preparing stream...'
+  }));
+
+  // Notify that stream is ready via legacy method as fallback
+  if (isStreaming) {
+    peer.ws.send(JSON.stringify({
+      type: 'stream_ready',
+      peerId,
+      fallback: 'websocket'
+    }));
+  }
+}
+
+function handleWebRTCAnswer(peerId, data) {
+  const peer = webrtcPeers.get(peerId);
+  if (!peer) return;
+
+  console.log(`Processing WebRTC answer from ${peerId}`);
+  // Handle SDP answer from client
+}
+
+function handleICECandidate(peerId, data) {
+  const peer = webrtcPeers.get(peerId);
+  if (!peer) return;
+
+  console.log(`Processing ICE candidate from ${peerId}`);
+  // In full implementation, add ICE candidate to peer connection
+}
+
+// Broadcast to all WebRTC peers
+function broadcastToWebRTCPeers(message) {
+  const messageStr = JSON.stringify(message);
+  webrtcPeers.forEach((peer, peerId) => {
+    if (peer.ws.readyState === WebSocket.OPEN) {
+      peer.ws.send(messageStr);
+    }
+  });
+}
+
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM, shutting down gracefully');
   stopCameraStream();
+  
+  // Close all WebRTC peers
+  webrtcPeers.forEach((peer, peerId) => {
+    peer.ws.close();
+  });
+  webrtcPeers.clear();
+
   server.close(() => {
     process.exit(0);
   });
@@ -205,6 +512,12 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('Received SIGINT, shutting down gracefully');
   stopCameraStream();
+  
+  webrtcPeers.forEach((peer) => {
+    peer.ws.close();
+  });
+  webrtcPeers.clear();
+
   server.close(() => {
     process.exit(0);
   });
@@ -213,6 +526,7 @@ process.on('SIGINT', () => {
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Pi Camera Server running on port ${PORT}`);
-  console.log(`WebSocket endpoint: ws://localhost:${PORT}/camera-stream`);
+  console.log(`Legacy WebSocket: ws://localhost:${PORT}/camera-stream`);
+  console.log(`WebRTC Signaling: ws://localhost:${PORT}/webrtc-signaling`);
   console.log(`HTTP API: http://localhost:${PORT}/api/camera/`);
 });

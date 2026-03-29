@@ -9,9 +9,11 @@ import { Link } from 'react-router-dom';
 
 const Index = () => {
   const [isRecording, setIsRecording] = useState(false);
+  const [recordingId, setRecordingId] = useState<string | null>(null);
 
-  const handleRecordingChange = (recording: boolean) => {
+  const handleRecordingChange = (recording: boolean, id?: string | null) => {
     setIsRecording(recording);
+    setRecordingId(id ?? null);
   };
 
   return (
@@ -51,7 +53,7 @@ const Index = () => {
           <StreamingSection onRecordingChange={handleRecordingChange} />
           
           <div className="mt-8">
-            <RecordingControls isRecording={isRecording} />
+            <RecordingControls isRecording={isRecording} recordingId={recordingId} onRecordingChange={handleRecordingChange} />
           </div>
         </div>
       </section>

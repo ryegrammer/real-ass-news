@@ -1,69 +1,43 @@
-# Welcome to your Lovable project
+# Real Ass News
 
-## Project info
+A streaming website for Raspberry Pi 5 that streams live content from the device's camera and records streams to build an educational content library.
 
-**URL**: https://lovable.dev/projects/deea6293-da9c-4cb1-959a-a3137d8caa10
-
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/deea6293-da9c-4cb1-959a-a3137d8caa10) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Quick Start (Raspberry Pi)
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+git clone https://github.com/ryegrammer/real-ass-news.git && cd real-ass-news && npm install && npm run build && cd docker && docker-compose -f docker-compose.pi.yml up -d
 ```
 
-**Edit a file directly in GitHub**
+## Access Points
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+After deployment, access:
+- **Web UI**: `http://raspberrypi.local:8080`
+- **Camera API**: `http://raspberrypi.local:3001/api/camera/*`
+- **WebRTC Signaling**: `ws://raspberrypi.local:3001/webrtc-signaling`
 
-**Use GitHub Codespaces**
+## Local Development
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```sh
+git clone https://github.com/ryegrammer/real-ass-news.git && cd real-ass-news && npm install && npm run dev
+```
 
-## What technologies are used for this project?
-
-This project is built with .
+## Technologies
 
 - Vite
 - TypeScript
 - React
 - shadcn-ui
 - Tailwind CSS
+- Docker (for Pi deployment)
 
-## How can I deploy this project?
+## Automated Deployment
 
-Simply open [Lovable](https://lovable.dev/projects/deea6293-da9c-4cb1-959a-a3137d8caa10) and click on Share -> Publish.
+Use the deploy script for one-command deployment to your Pi:
 
-## I want to use a custom domain - is that possible?
+```sh
+./scripts/deploy-to-pi.sh
+```
 
-We don't support custom domains (yet). If you want to deploy your project under your own domain then we recommend using Netlify. Visit our docs for more details: [Custom domains](https://docs.lovable.dev/tips-tricks/custom-domain/)
+## Project Info
+
+**Lovable URL**: https://lovable.dev/projects/deea6293-da9c-4cb1-959a-a3137d8caa10
