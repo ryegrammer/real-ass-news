@@ -35,10 +35,9 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
       const ok = await initPiCamera();
       if (!cancelled) {
         setPiReachable(ok);
-        // Fetch camera type from health endpoint
         try {
           const status = getCameraStatus();
-          const resp = await fetch(`http://${status.piHost}:${status.piHost.includes(':') ? '' : '8080'}/api/camera/health`);
+          const resp = await fetch(`${status.piHost.startsWith('http') ? status.piHost : 'http://' + status.piHost}:8080/api/camera/health`);
           const data = await resp.json();
           if (!cancelled && data.cameraType) setCameraType(data.cameraType);
         } catch (_) {}
