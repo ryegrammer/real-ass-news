@@ -142,12 +142,12 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
                 <>
                   <Wifi className="size-4 text-green-400" /> Pi server reachable at {piHost}
                   {cameraType && cameraType !== 'none' && (
-                    <span className="ml-2 px-2 py-0.5 rounded bg-white/10 text-white/80 text-xs">
+                    <span className="ml-2 px-2 py-0.5 rounded bg-accent/20 text-accent-foreground text-xs">
                       {cameraType === 'usb' ? 'USB Camera' : 'CSI Camera'}
                     </span>
                   )}
                   {cameraType === 'none' && (
-                    <span className="ml-2 px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-xs">
+                    <span className="ml-2 px-2 py-0.5 rounded bg-destructive/20 text-destructive text-xs">
                       No camera detected
                     </span>
                   )}
