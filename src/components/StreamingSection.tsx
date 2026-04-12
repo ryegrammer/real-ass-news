@@ -23,6 +23,7 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
   const [streamQuality, setStreamQuality] = useState<StreamQuality>('auto');
   const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
   const [piReachable, setPiReachable] = useState<boolean | null>(null);
+  const [cameraType, setCameraType] = useState<'csi' | 'usb' | 'none' | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const isMobile = useIsMobile();
   const { toast } = useToast();
@@ -32,7 +33,16 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
     let cancelled = false;
     const probe = async () => {
       const ok = await initPiCamera();
-      if (!cancelled) setPiReachable(ok);
+      if (!cancelled) {
+        setPiReachable(ok);
+        // Fetch camera type from health endpoint
+        try {
+          const status = getCameraStatus();
+          const resp = await fetch(`http://${status.piHost}:${status.piHost.includes(':') ? '' : '8080'}/api/camera/health`);
+          const data = await resp.json();
+          if (!cancelled && data.cameraType) setCameraType(data.cameraType);
+        } catch (_) {}
+      }
     };
     probe();
     return () => { cancelled = true; };
@@ -130,7 +140,19 @@ const StreamingSection: React.FC<StreamingSectionProps> = ({ onRecordingChange }
               {piReachable === null ? (
                 'Checking Pi…'
               ) : piReachable ? (
-                <><Wifi className="size-4 text-green-400" /> Pi server reachable at {piHost}</>
+                <>
+                  <Wifi className="size-4 text-green-400" /> Pi server reachable at {piHost}
+                  {cameraType && cameraType !== 'none' && (
+                    <span className="ml-2 px-2 py-0.5 rounded bg-white/10 text-white/80 text-xs">
+                      {cameraType === 'usb' ? 'USB Camera' : 'CSI Camera'}
+                    </span>
+                  )}
+                  {cameraType === 'none' && (
+                    <span className="ml-2 px-2 py-0.5 rounded bg-red-500/20 text-red-300 text-xs">
+                      No camera detected
+                    </span>
+                  )}
+                </>
               ) : (
                 <><WifiOff className="size-4 text-red-400" /> Pi server unreachable ({piHost})</>
               )}
