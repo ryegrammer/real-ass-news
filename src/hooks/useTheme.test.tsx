@@ -28,7 +28,7 @@ describe('useTheme', () => {
 
     // Reset the mock implementation
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue(['bright', mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue(['bright', mockSetTheme, vi.fn()])
   })
 
   afterEach(() => {
@@ -58,7 +58,7 @@ describe('useTheme', () => {
   it('should toggle from galactic to bright', async () => {
     // Mock galactic theme
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue(['galactic', mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue(['galactic', mockSetTheme, vi.fn()])
 
     const { result } = renderHook(() => useTheme())
 
@@ -74,7 +74,7 @@ describe('useTheme', () => {
   it('should handle dark theme (legacy)', async () => {
     // Mock dark theme
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue(['dark', mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue(['dark', mockSetTheme, vi.fn()])
 
     const { result } = renderHook(() => useTheme())
 
@@ -98,7 +98,7 @@ describe('useTheme', () => {
 
   it('should initialize theme correctly for galactic', async () => {
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue(['galactic', mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue(['galactic', mockSetTheme, vi.fn()])
 
     const { result } = renderHook(() => useTheme())
 
@@ -112,7 +112,7 @@ describe('useTheme', () => {
 
   it('should handle null theme from localStorage', async () => {
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue([null, mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue([null, mockSetTheme, vi.fn()])
 
     const { result } = renderHook(() => useTheme())
 
@@ -121,7 +121,7 @@ describe('useTheme', () => {
 
   it('should handle undefined theme from localStorage', async () => {
     const { useLocalStorage } = await import('react-use')
-    vi.mocked(useLocalStorage).mockReturnValue([undefined, mockSetTheme])
+    vi.mocked(useLocalStorage).mockReturnValue([undefined, mockSetTheme, vi.fn()])
 
     const { result } = renderHook(() => useTheme())
 

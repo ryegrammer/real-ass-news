@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -25,6 +25,50 @@ try { fs.mkdirSync(RECORDING_PATH, { recursive: true }); } catch (_) {}
 // Track WebRTC peers
 const webrtcPeers = new Map();
 
+// ---- Camera type detection ----
+let detectedCameraType = null; // cached after first detection
+
+function detectCameraType() {
+  if (detectedCameraType) return detectedCameraType;
+
+  // 1. Check for CSI camera via libcamera
+  try {
+    const out = execSync('libcamera-vid --list-cameras 2>&1', { timeout: 5000 }).toString();
+    if (out && !out.includes('No cameras available')) {
+      detectedCameraType = 'csi';
+      console.log('Detected CSI camera via libcamera');
+      return 'csi';
+    }
+  } catch (_) {}
+
+  // 2. Check for V4L2 (USB) devices
+  const cameraDevice = process.env.CAMERA_DEVICE || '/dev/video0';
+  try {
+    if (fs.existsSync(cameraDevice)) {
+      detectedCameraType = 'usb';
+      console.log(`Detected USB camera at ${cameraDevice}`);
+      return 'usb';
+    }
+    // Also check common alternatives
+    for (const dev of ['/dev/video0', '/dev/video1', '/dev/video2']) {
+      if (fs.existsSync(dev)) {
+        detectedCameraType = 'usb';
+        console.log(`Detected USB camera at ${dev}`);
+        return 'usb';
+      }
+    }
+  } catch (_) {}
+
+  detectedCameraType = 'none';
+  console.log('No camera detected');
+  return 'none';
+}
+
+// Force re-detection (e.g. after hot-plugging a camera)
+function resetCameraDetection() {
+  detectedCameraType = null;
+}
+
 // Middleware
 app.use(express.json());
 
@@ -43,9 +87,14 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.get('/api/camera/health', (req, res) => {
+  // Reset detection cache so health always gives fresh info
+  resetCameraDetection();
+  const cameraType = detectCameraType();
+
   res.json({
     status: 'healthy',
     streaming: isStreaming,
+    cameraType,
     webrtcPeers: webrtcPeers.size,
     timestamp: new Date().toISOString()
   });
@@ -62,7 +111,7 @@ app.post('/api/camera/start', (req, res) => {
   try {
     startCameraStream(quality);
     isStreaming = true;
-    res.json({ status: 'started', quality });
+    res.json({ status: 'started', quality, cameraType: detectedCameraType });
   } catch (error) {
     console.error('Failed to start camera:', error);
     res.status(500).json({ error: 'Failed to start camera stream' });
@@ -85,6 +134,7 @@ app.post('/api/camera/stop', (req, res) => {
 app.get('/api/camera/status', (req, res) => {
   res.json({
     streaming: isStreaming,
+    cameraType: detectedCameraType || detectCameraType(),
     connected_clients: wss.clients.size,
     webrtc_peers: webrtcPeers.size,
     uptime: process.uptime()
@@ -106,39 +156,64 @@ app.post('/api/camera/record/start', (req, res) => {
   const fileName = `${safeName}_${id}.h264`;
   const filePath = path.join(RECORDING_PATH, fileName);
   const settings = qualitySettings[quality] || qualitySettings.medium;
+  const camType = detectCameraType();
 
   try {
-    const recArgs = [
-      '--nopreview',
-      '--timeout', '0',
-      '--width', settings.width.toString(),
-      '--height', settings.height.toString(),
-      '--framerate', settings.framerate.toString(),
-      '--bitrate', settings.bitrate.toString(),
-      '--output', filePath,
-      '--codec', 'h264',
-      '--inline',
-    ];
+    let recProcess;
 
-    const recProcess = spawn('libcamera-vid', recArgs, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    recProcess.on('error', () => {
-      // Fallback to raspivid
-      const rvArgs = [
-        '-t', '0',
-        '-w', settings.width.toString(),
-        '-h', settings.height.toString(),
-        '-fps', settings.framerate.toString(),
-        '-b', settings.bitrate.toString(),
-        '-o', filePath,
-        '-pf', 'baseline',
+    if (camType === 'usb') {
+      // USB camera → use ffmpeg
+      const cameraDevice = process.env.CAMERA_DEVICE || '/dev/video0';
+      const ffmpegArgs = [
+        '-f', 'v4l2',
+        '-video_size', `${settings.width}x${settings.height}`,
+        '-framerate', settings.framerate.toString(),
+        '-i', cameraDevice,
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-b:v', settings.bitrate.toString(),
+        '-f', 'h264',
+        filePath,
       ];
-      activeRecording.process = spawn('raspivid', rvArgs, {
+      recProcess = spawn('ffmpeg', ffmpegArgs, {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-    });
+      recProcess.stderr.on('data', (d) => console.error('ffmpeg rec stderr:', d.toString()));
+    } else {
+      // CSI camera → libcamera-vid with raspivid fallback
+      const recArgs = [
+        '--nopreview',
+        '--timeout', '0',
+        '--width', settings.width.toString(),
+        '--height', settings.height.toString(),
+        '--framerate', settings.framerate.toString(),
+        '--bitrate', settings.bitrate.toString(),
+        '--output', filePath,
+        '--codec', 'h264',
+        '--inline',
+      ];
+
+      recProcess = spawn('libcamera-vid', recArgs, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      recProcess.on('error', () => {
+        // Fallback to raspivid
+        const rvArgs = [
+          '-t', '0',
+          '-w', settings.width.toString(),
+          '-h', settings.height.toString(),
+          '-fps', settings.framerate.toString(),
+          '-b', settings.bitrate.toString(),
+          '-o', filePath,
+          '-pf', 'baseline',
+        ];
+        activeRecording.process = spawn('raspivid', rvArgs, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      });
+    }
 
     recProcess.on('close', () => {
       if (activeRecording && activeRecording.id === id) {
@@ -147,8 +222,8 @@ app.post('/api/camera/record/start', (req, res) => {
     });
 
     activeRecording = { id, name, quality, filePath, fileName, startedAt: Date.now(), process: recProcess };
-    console.log(`Recording started: ${id} → ${filePath}`);
-    res.json({ id, name, quality });
+    console.log(`Recording started (${camType}): ${id} → ${filePath}`);
+    res.json({ id, name, quality, cameraType: camType });
   } catch (error) {
     console.error('Failed to start recording:', error);
     res.status(500).json({ error: 'Failed to start recording' });
@@ -252,47 +327,95 @@ const qualitySettings = {
 
 function startCameraStream(quality) {
   const settings = qualitySettings[quality] || qualitySettings.medium;
+  const camType = detectCameraType();
 
-  // Use libcamera for Raspberry Pi Camera Module 3
-  const cameraArgs = [
-    '--nopreview',
-    '--timeout', '0',
-    '--width', settings.width.toString(),
-    '--height', settings.height.toString(),
-    '--framerate', settings.framerate.toString(),
-    '--bitrate', settings.bitrate.toString(),
-    '--output', '-',
-    '--codec', 'h264',
-    '--inline',
-    '--listen'
-  ];
+  console.log(`Starting camera stream (${camType}) with quality: ${quality}`, settings);
 
-  console.log(`Starting camera with quality: ${quality}`, settings);
-
-  cameraProcess = spawn('libcamera-vid', cameraArgs, {
-    stdio: ['ignore', 'pipe', 'pipe']
-  });
-
-  cameraProcess.on('error', (error) => {
-    console.error('Camera process error:', error);
-    console.log('Trying fallback to raspivid...');
-    
-    const raspividArgs = [
-      '-t', '0',
-      '-w', settings.width.toString(),
-      '-h', settings.height.toString(),
-      '-fps', settings.framerate.toString(),
-      '-b', settings.bitrate.toString(),
-      '-o', '-',
-      '-pf', 'baseline'
+  if (camType === 'usb') {
+    // USB camera → ffmpeg producing H.264 on stdout
+    const cameraDevice = process.env.CAMERA_DEVICE || '/dev/video0';
+    const ffmpegArgs = [
+      '-f', 'v4l2',
+      '-video_size', `${settings.width}x${settings.height}`,
+      '-framerate', settings.framerate.toString(),
+      '-i', cameraDevice,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-b:v', settings.bitrate.toString(),
+      '-f', 'h264',
+      '-',
     ];
 
-    cameraProcess = spawn('raspivid', raspividArgs, {
+    cameraProcess = spawn('ffmpeg', ffmpegArgs, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    cameraProcess.stderr.on('data', (data) => {
+      // ffmpeg writes progress to stderr — only log errors
+      const msg = data.toString();
+      if (msg.includes('Error') || msg.includes('error')) {
+        console.error('ffmpeg error:', msg);
+      }
+    });
+  } else {
+    // CSI camera → libcamera-vid with raspivid fallback
+    const cameraArgs = [
+      '--nopreview',
+      '--timeout', '0',
+      '--width', settings.width.toString(),
+      '--height', settings.height.toString(),
+      '--framerate', settings.framerate.toString(),
+      '--bitrate', settings.bitrate.toString(),
+      '--output', '-',
+      '--codec', 'h264',
+      '--inline',
+      '--listen'
+    ];
+
+    cameraProcess = spawn('libcamera-vid', cameraArgs, {
       stdio: ['ignore', 'pipe', 'pipe']
     });
-  });
 
-  cameraProcess.stdout.on('data', (data) => {
+    cameraProcess.on('error', (error) => {
+      console.error('Camera process error:', error);
+      console.log('Trying fallback to raspivid...');
+
+      const raspividArgs = [
+        '-t', '0',
+        '-w', settings.width.toString(),
+        '-h', settings.height.toString(),
+        '-fps', settings.framerate.toString(),
+        '-b', settings.bitrate.toString(),
+        '-o', '-',
+        '-pf', 'baseline'
+      ];
+
+      cameraProcess = spawn('raspivid', raspividArgs, {
+        stdio: ['ignore', 'pipe', 'pipe']
+      });
+
+      // Attach stdout listener to fallback process
+      attachStdoutBroadcast(cameraProcess);
+    });
+
+    cameraProcess.stderr.on('data', (data) => {
+      console.error('Camera stderr:', data.toString());
+    });
+  }
+
+  // Broadcast stdout H.264 data to WebSocket clients
+  attachStdoutBroadcast(cameraProcess);
+
+  cameraProcess.on('close', (code) => {
+    console.log(`Camera process exited with code ${code}`);
+    isStreaming = false;
+  });
+}
+
+function attachStdoutBroadcast(proc) {
+  if (!proc || !proc.stdout) return;
+  proc.stdout.on('data', (data) => {
     // Broadcast to legacy WebSocket clients
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
@@ -310,15 +433,6 @@ function startCameraStream(quality) {
         }
       }
     });
-  });
-
-  cameraProcess.stderr.on('data', (data) => {
-    console.error('Camera stderr:', data.toString());
-  });
-
-  cameraProcess.on('close', (code) => {
-    console.log(`Camera process exited with code ${code}`);
-    isStreaming = false;
   });
 }
 
@@ -390,9 +504,6 @@ signalingWss.on('connection', (ws) => {
 
       switch (data.type) {
         case 'offer':
-          // In a full implementation, this would create an RTCPeerConnection
-          // and generate an answer. For Pi, we'd use GStreamer or similar
-          // to handle the actual WebRTC connection.
           handleWebRTCOffer(peerId, data);
           break;
 
@@ -442,22 +553,14 @@ function handleWebRTCOffer(peerId, data) {
   const peer = webrtcPeers.get(peerId);
   if (!peer) return;
 
-  // For a complete WebRTC implementation on Pi, you would:
-  // 1. Use node-webrtc or wrtc package
-  // 2. Or spawn GStreamer with webrtcbin
-  // 3. Create answer SDP and send back
-
-  // Simplified response - in production, integrate with actual WebRTC stack
   console.log(`Processing WebRTC offer from ${peerId}`);
-  
-  // Send acknowledgment (actual answer would come from WebRTC stack)
+
   peer.ws.send(JSON.stringify({
     type: 'offer_received',
     peerId,
     message: 'WebRTC offer received. Preparing stream...'
   }));
 
-  // Notify that stream is ready via legacy method as fallback
   if (isStreaming) {
     peer.ws.send(JSON.stringify({
       type: 'stream_ready',
@@ -470,20 +573,15 @@ function handleWebRTCOffer(peerId, data) {
 function handleWebRTCAnswer(peerId, data) {
   const peer = webrtcPeers.get(peerId);
   if (!peer) return;
-
   console.log(`Processing WebRTC answer from ${peerId}`);
-  // Handle SDP answer from client
 }
 
 function handleICECandidate(peerId, data) {
   const peer = webrtcPeers.get(peerId);
   if (!peer) return;
-
   console.log(`Processing ICE candidate from ${peerId}`);
-  // In full implementation, add ICE candidate to peer connection
 }
 
-// Broadcast to all WebRTC peers
 function broadcastToWebRTCPeers(message) {
   const messageStr = JSON.stringify(message);
   webrtcPeers.forEach((peer, peerId) => {
@@ -497,8 +595,7 @@ function broadcastToWebRTCPeers(message) {
 process.on('SIGTERM', () => {
   console.log('Received SIGTERM, shutting down gracefully');
   stopCameraStream();
-  
-  // Close all WebRTC peers
+
   webrtcPeers.forEach((peer, peerId) => {
     peer.ws.close();
   });
@@ -512,7 +609,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('Received SIGINT, shutting down gracefully');
   stopCameraStream();
-  
+
   webrtcPeers.forEach((peer) => {
     peer.ws.close();
   });
@@ -526,6 +623,7 @@ process.on('SIGINT', () => {
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`Pi Camera Server running on port ${PORT}`);
+  console.log(`Camera type: ${detectCameraType()}`);
   console.log(`Legacy WebSocket: ws://localhost:${PORT}/camera-stream`);
   console.log(`WebRTC Signaling: ws://localhost:${PORT}/webrtc-signaling`);
   console.log(`HTTP API: http://localhost:${PORT}/api/camera/`);

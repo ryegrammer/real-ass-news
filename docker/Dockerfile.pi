@@ -19,8 +19,8 @@ RUN npm run build
 # Production stage for Raspberry Pi
 FROM nginx:alpine
 
-# Install Node.js for potential server-side requirements
-RUN apk add --no-cache nodejs npm
+# Install Node.js and ffmpeg (for USB camera support)
+RUN apk add --no-cache nodejs npm ffmpeg
 
 # Copy built application
 COPY --from=builder /app/dist /usr/share/nginx/html

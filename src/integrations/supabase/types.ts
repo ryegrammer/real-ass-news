@@ -62,7 +62,9 @@ export type Database = {
           image_url: string | null
           impact: string | null
           recommendations: string[] | null
+          related_apps: string[] | null
           sequence: number
+          session_id: string | null
           subjects: string[] | null
           summary: string | null
           system_entry: boolean | null
@@ -84,7 +86,9 @@ export type Database = {
           image_url?: string | null
           impact?: string | null
           recommendations?: string[] | null
+          related_apps?: string[] | null
           sequence: number
+          session_id?: string | null
           subjects?: string[] | null
           summary?: string | null
           system_entry?: boolean | null
@@ -106,7 +110,9 @@ export type Database = {
           image_url?: string | null
           impact?: string | null
           recommendations?: string[] | null
+          related_apps?: string[] | null
           sequence?: number
+          session_id?: string | null
           subjects?: string[] | null
           summary?: string | null
           system_entry?: boolean | null
@@ -116,6 +122,50 @@ export type Database = {
           updated_at?: string
           user_id?: string | null
           user_prompt?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_advice_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "ai_advice_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_advice_sessions: {
+        Row: {
+          created_at: string
+          description: string | null
+          evaluation_score: number | null
+          evaluation_summary: string | null
+          id: string
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          evaluation_score?: number | null
+          evaluation_summary?: string | null
+          id?: string
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          evaluation_score?: number | null
+          evaluation_summary?: string | null
+          id?: string
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
