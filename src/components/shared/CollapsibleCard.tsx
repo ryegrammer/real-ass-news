@@ -6,16 +6,39 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Props for CollapsibleCard component.
+ */
 interface CollapsibleCardProps {
+  /** Card header title */
   title: string;
+  /** Optional inline text after title (muted style) */
   subtitle?: string;
+  /** Optional description below title */
   description?: string;
+  /** Optional Lucide icon for title */
   icon?: LucideIcon;
+  /** Initial collapsed state (default: true) */
   defaultOpen?: boolean;
+  /** Optional controls rendered in header right side */
   headerControls?: React.ReactNode;
+  /** Card body content */
   children: React.ReactNode;
+  /** Additional CSS classes */
   className?: string;
 }
+
+/**
+ * Reusable collapsible card component for high-density information layouts.
+ * Designed for export to Ship Desk and other NHTS projects.
+ *
+ * @example
+ * ```tsx
+ * <CollapsibleCard title="Settings" icon={Settings} defaultOpen={false}>
+ *   <p>Card content here</p>
+ * </CollapsibleCard>
+ * ```
+ */
 
 export const CollapsibleCard = ({
   title,
